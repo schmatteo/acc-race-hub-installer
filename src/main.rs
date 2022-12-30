@@ -1,3 +1,4 @@
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::{
@@ -96,18 +97,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .for_each(|question| variable(question, &mut server_file));
 
-    // INSTALLING NPM PACKAGES
-    env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap();
-    Command::new("cmd")
-        .args(["/C", "npm", "i", "--quiet"])
-        .stdout(Stdio::null())
-        .output()?;
+    let npm_thread = std::thread::spawn(|| {
+        // INSTALLING NPM PACKAGES
+        env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap();
+        Command::new("cmd")
+            .args(["/C", "npm", "i"])
+            .stdout(Stdio::null())
+            .output()
+            .unwrap();
 
-    env::set_current_dir("../server").unwrap();
-    Command::new("cmd")
-        .args(["/C", "npm", "i", "--silent"])
-        .stdout(Stdio::null())
-        .output()?;
+        env::set_current_dir("../server").unwrap();
+        Command::new("cmd")
+            .args(["/C", "npm", "i"])
+            .stdout(Stdio::null())
+            .output()
+            .unwrap();
+    });
+
+    let pb = ProgressBar::new_spinner();
+
+    // Set the spinner message
+    pb.set_message("Installing dependencies...");
+
+    // Set the spinner style
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .template("{prefix:.bold.dim} {spinner} {wide_msg}")
+            .unwrap(),
+    );
+
+    loop {
+        pb.inc(1);
+        if npm_thread.is_finished() {
+            break;
+        };
+    }
+
+    pb.finish_with_message("Thank you");
 
     Ok(())
 }
