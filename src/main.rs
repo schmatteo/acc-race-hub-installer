@@ -1,65 +1,99 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use std::collections::HashMap;
-use std::{
-    env,
-    fs::File,
-    io,
-    io::prelude::*,
-    io::Write,
-    process::{Command, Stdio},
-};
+use std::{fs, fs::File, io, io::prelude::*, io::Write, process::Command};
 use zip::ZipArchive;
 
-// TODO error handling + fetch api for newest ver
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create an HTTP client
+fn main() {
     let client = Client::new();
 
-    // Send an HTTP request to the URL of the ZIP file
+    let latest_release = client
+        .get("https://api.github.com/repos/schmatteo/acc-race-hub/releases/latest")
+        .header("User-Agent", "schmatteo/acc-race-hub")
+        .send()
+        .map(|mut resp| {
+            let mut body = String::new();
+            resp.read_to_string(&mut body).unwrap_or_else(|_| {
+                println!("Cannot find latest release");
+                std::process::exit(0);
+            });
+            let data: serde_json::Value = serde_json::from_str(&body).unwrap_or_else(|_| {
+                println!("Cannot find latest release");
+                std::process::exit(0);
+            });
+            data["tag_name"].as_str().unwrap().to_string()
+        })
+        .unwrap_or_else(|_| "1.1.0".to_string());
+
     let mut res = client
-        .get("https://github.com/schmatteo/acc-race-hub/archive/refs/tags/1.1.0.zip")
-        .send()?;
+        .get(format!(
+            "https://github.com/schmatteo/acc-race-hub/archive/refs/tags/{latest_release}.zip"
+        ))
+        .send()
+        .unwrap_or_else(|_| {
+            println!("Cannot find latest release");
+            std::process::exit(0);
+        });
 
-    // Read the resonse body into a vector of bytes
     let mut body = Vec::new();
-    res.read_to_end(&mut body)?;
+    res.read_to_end(&mut body).unwrap_or_else(|_| {
+        println!("Cannot find latest release");
+        std::process::exit(0);
+    });
 
-    // Save the bytes to a local file
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
         .read(true)
-        .open("1.1.0.zip")?;
+        .open(format!("{latest_release}.zip"))
+        .unwrap_or_else(|_| {
+            println!("Cannot open a file.");
+            std::process::exit(0);
+        });
 
-    file.write_all(&body)?;
+    file.write_all(&body).unwrap_or_else(|_| {
+        println!("Cannot write to a file.");
+        std::process::exit(0);
+    });
 
-    // UNZIPPING
+    let current_path = std::env::current_dir().unwrap();
+    let client_path = current_path.join(format!("acc-race-hub-{latest_release}/client"));
+    let server_path = current_path.join(format!("acc-race-hub-{latest_release}/server"));
 
-    // Create a ZIP archive from the file
-    let mut zip = ZipArchive::new(file)?;
+    let mut zip = ZipArchive::new(file).unwrap_or_else(|_| {
+        println!("Cannot extract an archive.");
+        std::process::exit(0);
+    });
 
-    // Iterate over the files in the archive
     for i in 1..zip.len() {
-        // Get a reference to the file
-        let mut file = zip.by_index(i)?;
+        let mut file = zip.by_index(i).unwrap_or_else(|_| {
+            println!("Cannot extract an archive.");
+            std::process::exit(0);
+        });
 
         if !file.is_dir() {
-            // Extract the file to the current directory
             let outpath = file.mangled_name();
-            std::fs::create_dir_all(outpath.parent().unwrap())?;
-            let mut outfile = std::fs::OpenOptions::new()
+            fs::create_dir_all(outpath.parent().unwrap()).unwrap_or_else(|_| {
+                println!("Cannot extract an archive.");
+                std::process::exit(0);
+            });
+            let mut outfile = fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
                 .create(true)
                 .read(true)
-                .open(outpath)?;
-            std::io::copy(&mut file, &mut outfile)?;
+                .open(outpath)
+                .unwrap_or_else(|_| {
+                    println!("Cannot extract an archive.");
+                    std::process::exit(0);
+                });
+            std::io::copy(&mut file, &mut outfile).unwrap_or_else(|_| {
+                println!("Cannot extract an archive.");
+                std::process::exit(0);
+            });
         }
     }
-
-    // PROMPTIN
 
     let client_questions = vec!["REACT_APP_BACKEND_URL"];
     let server_questions = vec!["MONGO_URI", "RESULTS_FOLDER"];
@@ -73,64 +107,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Enter {question}");
 
             let mut input = String::new();
-            io::stdin()
-                .read_line(&mut input)
-                .unwrap_or_else(|_error| panic!("There's been an error getting the input."));
+            io::stdin().read_line(&mut input).unwrap_or_else(|_| {
+                println!("Cannot create a .env file.");
+                std::process::exit(0);
+            });
 
             input = input.trim().to_string();
 
             answers.insert(question, input);
         });
 
-    // WRITIN INTO FILE
-
     let variable = |question, file: &mut File| {
         let concatenated = format!("{}=\"{}\"\n", question, answers.get(question).unwrap());
-        file.write_all(concatenated.as_bytes())
-            .unwrap_or_else(|_error| panic!("Error writing to .env file."));
+        file.write_all(concatenated.as_bytes()).unwrap_or_else(|_| {
+            println!("Error writing to a .env file.");
+            std::process::exit(0);
+        });
     };
 
-    let mut client_file = File::create("./acc-race-hub-1.1.0/client/.env")?;
+    let mut client_file = File::create(format!("./acc-race-hub-{latest_release}/client/.env"))
+        .unwrap_or_else(|_| {
+            println!("Cannot create a .env file.");
+            std::process::exit(0);
+        });
     client_questions
         .iter()
         .for_each(|question| variable(question, &mut client_file));
 
-    let mut server_file = File::create("./acc-race-hub-1.1.0/server/.env")?;
+    let mut server_file = File::create(format!("./acc-race-hub-{latest_release}/server/.env"))
+        .unwrap_or_else(|_| {
+            println!("Cannot create a .env file.");
+            std::process::exit(0);
+        });
     server_questions
         .iter()
         .for_each(|question| variable(question, &mut server_file));
 
-    let npm_thread = std::thread::spawn(|| {
-        // INSTALLING NPM PACKAGES
-        let dir_error = |_error| panic!("There's been an error changing directory.");
-        let command_error = |_error| {
-            panic!("There's been an error installing packages. Do you have node.js installed?")
-        };
+    let assets = vec!["logo192.png", "logo512.png", "banner.png", "favicon.ico"];
 
-        env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap_or_else(dir_error);
-        Command::new("cmd")
-            .args(["/C", "npm", "i"])
-            .stdout(Stdio::null())
-            .output()
-            .unwrap_or_else(command_error);
-
-        env::set_current_dir("../server").unwrap_or_else(dir_error);
-        Command::new("cmd")
-            .args(["/C", "npm", "i"])
-            .stdout(Stdio::null())
-            .output()
-            .unwrap_or_else(command_error);
+    assets.iter().for_each(|asset| {
+        let path_buff = std::path::PathBuf::from(format!("./{asset}"));
+        let file_name = path_buff.file_name().unwrap().to_str().unwrap();
+        if path_buff.exists() {
+            fs::copy(&path_buff, client_path.join(format!("public/{file_name}"))).unwrap();
+        }
     });
 
     let pb = ProgressBar::new_spinner();
 
-    // Set the spinner message
     pb.set_message("Installing dependencies...");
 
-    // Set the spinner style
     pb.set_style(
         ProgressStyle::default_spinner()
-            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .tick_chars("|/-\\|")
             .template("{prefix:.bold.dim} {spinner} {wide_msg}")
             .unwrap_or_else(|_error| {
                 println!("There's been an error initialising a loading bar.");
@@ -138,14 +167,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
     );
 
-    loop {
-        pb.inc(1);
-        if npm_thread.is_finished() {
-            break;
-        };
-    }
+    let command_error = |_error| {
+        println!("Cannot create a .env file.");
+        std::process::exit(0);
+    };
+
+    std::thread::scope(|f| {
+        let client_thread = f.spawn(|| {
+            Command::new("cmd")
+                .args(["/C", "npm", "i"])
+                .current_dir(&client_path)
+                .output()
+                .unwrap_or_else(command_error);
+
+            Command::new("cmd")
+                .args(["/C", "npm", "run", "build"])
+                .current_dir(&client_path)
+                .output()
+                .unwrap_or_else(command_error);
+        });
+
+        let server_thread = f.spawn(|| {
+            Command::new("cmd")
+                .current_dir(&server_path)
+                .args(["/C", "npm", "i"])
+                .output()
+                .unwrap_or_else(command_error);
+
+            Command::new("cmd")
+                .current_dir(&server_path)
+                .args(["/C", "npx", "tsc"])
+                .output()
+                .unwrap_or_else(command_error);
+        });
+
+        loop {
+            pb.inc(1);
+            let duration = std::time::Duration::from_millis(100);
+            std::thread::sleep(duration);
+            if client_thread.is_finished() && server_thread.is_finished() {
+                break;
+            };
+        }
+    });
 
     pb.finish_with_message("Installation finished");
-
-    Ok(())
 }
