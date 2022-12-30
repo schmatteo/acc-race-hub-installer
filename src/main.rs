@@ -1,10 +1,13 @@
 use reqwest::blocking::Client;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::io::prelude::*;
-use std::io::Write;
-use std::process::Command;
+use std::{
+    env,
+    fs::File,
+    io,
+    io::prelude::*,
+    io::Write,
+    process::{Command, Stdio},
+};
 use zip::ZipArchive;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -94,14 +97,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .for_each(|question| variable(question, &mut server_file));
 
     // INSTALLING NPM PACKAGES
-    Command::new("npm")
-        .arg("i")
-        .arg("./acc-race-hub-1.1.0/client")
-        .spawn()?;
-    Command::new("npm")
-        .arg("i")
-        .arg("./acc-race-hub-1.1.0/server")
-        .spawn()?;
+    env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap();
+    Command::new("cmd")
+        .args(["/C", "npm", "i", "--quiet"])
+        .stdout(Stdio::null())
+        .output()?;
+
+    env::set_current_dir("../server").unwrap();
+    Command::new("cmd")
+        .args(["/C", "npm", "i", "--silent"])
+        .stdout(Stdio::null())
+        .output()?;
 
     Ok(())
 }
