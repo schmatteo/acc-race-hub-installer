@@ -11,13 +11,14 @@ use std::{
 };
 use zip::ZipArchive;
 
+// TODO error handling + fetch api for newest ver
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an HTTP client
     let client = Client::new();
 
     // Send an HTTP request to the URL of the ZIP file
     let mut res = client
-        .get("https://github.com/schmatteo/acc-race-hub/archive/refs/tags/v1.1.0.zip")
+        .get("https://github.com/schmatteo/acc-race-hub/archive/refs/tags/1.1.0.zip")
         .send()?;
 
     // Read the resonse body into a vector of bytes
@@ -30,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .truncate(true)
         .create(true)
         .read(true)
-        .open("v1.1.0.zip")?;
+        .open("1.1.0.zip")?;
 
     file.write_all(&body)?;
 
@@ -48,7 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Extract the file to the current directory
             let outpath = file.mangled_name();
             std::fs::create_dir_all(outpath.parent().unwrap())?;
-            // let mut outfile = std::fs::File::create(&outpath)?;
             let mut outfile = std::fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
@@ -73,7 +73,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Enter {question}");
 
             let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
+            io::stdin()
+                .read_line(&mut input)
+                .unwrap_or_else(|_error| panic!("There's been an error getting the input."));
 
             input = input.trim().to_string();
 
@@ -84,7 +86,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let variable = |question, file: &mut File| {
         let concatenated = format!("{}=\"{}\"\n", question, answers.get(question).unwrap());
-        file.write_all(concatenated.as_bytes()).unwrap();
+        file.write_all(concatenated.as_bytes())
+            .unwrap_or_else(|_error| panic!("Error writing to .env file."));
     };
 
     let mut client_file = File::create("./acc-race-hub-1.1.0/client/.env")?;
@@ -99,19 +102,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let npm_thread = std::thread::spawn(|| {
         // INSTALLING NPM PACKAGES
-        env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap();
-        Command::new("cmd")
-            .args(["/C", "npm", "i"])
-            .stdout(Stdio::null())
-            .output()
-            .unwrap();
+        let dir_error = |_error| panic!("There's been an error changing directory.");
+        let command_error = |_error| {
+            panic!("There's been an error installing packages. Do you have node.js installed?")
+        };
 
-        env::set_current_dir("../server").unwrap();
+        env::set_current_dir("./acc-race-hub-1.1.0/client").unwrap_or_else(dir_error);
         Command::new("cmd")
             .args(["/C", "npm", "i"])
             .stdout(Stdio::null())
             .output()
-            .unwrap();
+            .unwrap_or_else(command_error);
+
+        env::set_current_dir("../server").unwrap_or_else(dir_error);
+        Command::new("cmd")
+            .args(["/C", "npm", "i"])
+            .stdout(Stdio::null())
+            .output()
+            .unwrap_or_else(command_error);
     });
 
     let pb = ProgressBar::new_spinner();
@@ -124,7 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ProgressStyle::default_spinner()
             .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
             .template("{prefix:.bold.dim} {spinner} {wide_msg}")
-            .unwrap(),
+            .unwrap_or_else(|_error| {
+                println!("There's been an error initialising a loading bar.");
+                ProgressStyle::default_spinner()
+            }),
     );
 
     loop {
@@ -134,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
 
-    pb.finish_with_message("Thank you");
+    pb.finish_with_message("Installation finished");
 
     Ok(())
 }
