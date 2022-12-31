@@ -108,7 +108,7 @@ fn main() {
 
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap_or_else(|_| {
-                println!("Cannot create a .env file.");
+                println!("Error reading input.");
                 std::process::exit(0);
             });
 
@@ -210,6 +210,6 @@ fn main() {
             };
         }
     });
-
+    std::fs::remove_file(format!("./{latest_release}.zip")).ok();
     pb.finish_with_message("Installation finished");
 }
