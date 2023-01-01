@@ -57,7 +57,10 @@ fn main() {
         std::process::exit(0);
     });
 
-    let current_path = std::env::current_dir().unwrap();
+    let current_path = std::env::current_dir().unwrap_or_else(|_| {
+        println!("Cannot extract an archive.");
+        std::process::exit(0);
+    });
     let client_path = current_path.join(format!("acc-race-hub-{latest_release}/client"));
     let server_path = current_path.join(format!("acc-race-hub-{latest_release}/server"));
 
